@@ -1,8 +1,11 @@
 // lib/screens/resultado_screen.dart
 
+import 'package:b3_simulador/models/resultado_simulacao.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:provider/provider.dart';
+
 import '../models/resultado_simulacao.dart';
 import '../models/provento.dart';
 import '../services/simulador_service.dart';
@@ -10,6 +13,7 @@ import '../widgets/comparativo_renda_fixa_card.dart';
 import '../widgets/fonte_dados_indicator.dart';
 import '../widgets/grafico_evolucao.dart';
 import '../widgets/provento_tile.dart';
+import '../providers/simulacao_provider.dart';
 
 class ResultadoScreen extends StatefulWidget {
   final String ticker;
@@ -26,22 +30,19 @@ class ResultadoScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _ResultadoScreenState createState() => _ResultadoScreenState();
+  State<ResultadoScreen> createState() => _ResultadoScreenState();
 }
 
 class _ResultadoScreenState extends State<ResultadoScreen>
     with SingleTickerProviderStateMixin {
-  late Future<ResultadoSimulacao> _resultadoFuture;
+  ResultadoSimulacao? _resultado;
+  String? _error;
+  bool _isLoading = true;
   late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
 
-  // Controle para abas de detalhamento
   int _selectedTabIndex = 0;
-
-  // Controladores para scroll
   final ScrollController _scrollController = ScrollController();
 
-  // Formatação
   final currencyFormat = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   final percentFormat = NumberFormat.decimalPercentPattern(
     decimalDigits: 2,
@@ -52,21 +53,14 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   void initState() {
     super.initState();
 
-    // Inicializa animações
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-    _fadeAnimation = CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeInOut,
-    );
 
-    // Inicia a simulação
-    _resultadoFuture = _simular();
-
-    // Inicia animação após construção
+    // Inicia a simulação após o build
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _simular();
       _animationController.forward();
     });
   }
@@ -78,15 +72,38 @@ class _ResultadoScreenState extends State<ResultadoScreen>
     super.dispose();
   }
 
-  Future<ResultadoSimulacao> _simular() async {
-    final service = SimuladorService();
-    return await service.simular(
-      ticker: widget.ticker,
-      dataInicio: widget.dataInicio,
-      valorInvestido: widget.valorInvestido,
-      dataFim: widget.dataFim,
-      incluirComparacaoRendaFixa: true,
-    );
+  Future<void> _simular() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final service = SimuladorService();
+      final resultado = await service.simular(
+        ticker: widget.ticker,
+        dataInicio: widget.dataInicio,
+        valorInvestido: widget.valorInvestido,
+        dataFim: widget.dataFim,
+        incluirComparacaoRendaFixa: true,
+      );
+
+      if (mounted) {
+        setState(() {
+          _resultado = resultado;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -122,24 +139,19 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   }
 
   Widget _buildBody() {
-    return FutureBuilder<ResultadoSimulacao>(
-      future: _resultadoFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _buildLoadingState();
-        }
+    if (_isLoading) {
+      return _buildLoadingState();
+    }
 
-        if (snapshot.hasError) {
-          return _buildErrorState(snapshot.error.toString());
-        }
+    if (_error != null) {
+      return _buildErrorState(_error!);
+    }
 
-        if (!snapshot.hasData) {
-          return _buildEmptyState();
-        }
+    if (_resultado == null) {
+      return _buildEmptyState();
+    }
 
-        return _buildSuccessState(snapshot.data!);
-      },
-    );
+    return _buildSuccessState(_resultado!);
   }
 
   Widget _buildLoadingState() {
@@ -147,7 +159,6 @@ class _ResultadoScreenState extends State<ResultadoScreen>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Animação de loading personalizada
           Stack(
             alignment: Alignment.center,
             children: [
@@ -163,31 +174,18 @@ class _ResultadoScreenState extends State<ResultadoScreen>
             ],
           ),
           const SizedBox(height: 24),
-          Text(
+          const Text(
             'Buscando dados...',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 32),
             child: Text(
               'Consultando Yahoo Finance e Banco Central',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
-          ),
-          const SizedBox(height: 16),
-          // Simulador de progresso (opcional, apenas para UX)
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: 1),
-            duration: const Duration(seconds: 3),
-            builder: (context, value, child) {
-              return LinearProgressIndicator(
-                value: value,
-                backgroundColor: Colors.grey[200],
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[700]!),
-              );
-            },
           ),
         ],
       ),
@@ -203,26 +201,22 @@ class _ResultadoScreenState extends State<ResultadoScreen>
           children: [
             Icon(Icons.error_outline, size: 80, color: Colors.red[300]),
             const SizedBox(height: 24),
-            Text(
+            const Text(
               'Ops! Algo deu errado',
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             Text(
               error,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 ElevatedButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _resultadoFuture = _simular();
-                    });
-                  },
+                  onPressed: _simular,
                   icon: const Icon(Icons.refresh),
                   label: const Text('Tentar novamente'),
                   style: ElevatedButton.styleFrom(
@@ -236,9 +230,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
+                  onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('Voltar'),
                   style: OutlinedButton.styleFrom(
@@ -284,52 +276,30 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   }
 
   Widget _buildSuccessState(ResultadoSimulacao resultado) {
-    return FadeTransition(
-      opacity: _fadeAnimation,
-      child: RefreshIndicator(
-        onRefresh: () async {
-          setState(() {
-            _resultadoFuture = _simular();
-          });
-        },
-        child: CustomScrollView(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            // Header com valor principal
-            SliverToBoxAdapter(child: _buildHeaderCard(resultado)),
-
-            // Métricas rápidas
-            SliverToBoxAdapter(child: _buildMetricCards(resultado)),
-
-            // Abas de navegação
-            SliverToBoxAdapter(child: _buildTabBar()),
-
-            // Conteúdo das abas
-            SliverPadding(
-              padding: const EdgeInsets.all(16),
-              sliver: SliverToBoxAdapter(child: _buildTabContent(resultado)),
-            ),
-
-            // Comparativo renda fixa (se disponível)
-            if (resultado.comparativoRendaFixa != null)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: ComparativoRendaFixaCard(
-                  comparativo: resultado.comparativoRendaFixa!,
-                  retornoAcao: resultado.percentualRetorno,
-                  showDetalhado: true, // ou false para versão compacta
-                ),
-              ),
-
-            // Botão de exportar
-            SliverToBoxAdapter(child: _buildExportButton(resultado)),
-
-            // Espaço extra para o FAB
-            const SliverToBoxAdapter(child: SizedBox(height: 80)),
-          ],
+    return CustomScrollView(
+      controller: _scrollController,
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverToBoxAdapter(child: _buildHeaderCard(resultado)),
+        SliverToBoxAdapter(child: _buildMetricCards(resultado)),
+        SliverToBoxAdapter(child: _buildTabBar()),
+        SliverPadding(
+          padding: const EdgeInsets.all(16),
+          sliver: SliverToBoxAdapter(child: _buildTabContent(resultado)),
         ),
-      ),
+        if (resultado.comparativoRendaFixa != null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: ComparativoRendaFixaCard(
+                comparativo: resultado.comparativoRendaFixa!,
+                retornoAcao: resultado.percentualRetorno,
+              ),
+            ),
+          ),
+        SliverToBoxAdapter(child: _buildExportButton(resultado)),
+        const SliverToBoxAdapter(child: SizedBox(height: 80)),
+      ],
     );
   }
 
@@ -463,15 +433,15 @@ class _ResultadoScreenState extends State<ResultadoScreen>
           ),
         ],
       ),
-    ).animate().fadeIn(duration: 600.ms).slideY(begin: -0.2, end: 0);
+    );
   }
 
   Widget _buildMetricCards(ResultadoSimulacao resultado) {
-    return Container(
+    return SizedBox(
       height: 100,
-      margin: const EdgeInsets.symmetric(horizontal: 16),
       child: ListView(
         scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         children: [
           _buildMetricCard(
             'Ações',
@@ -546,22 +516,22 @@ class _ResultadoScreenState extends State<ResultadoScreen>
           const SizedBox(height: 8),
           Text(
             value,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Colors.grey[800],
+              color: Color(0xFF1F2937),
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
-    ).animate().fadeIn(delay: 200.ms).slideX(begin: 0.2, end: 0);
+    );
   }
 
   Widget _buildTabBar() {
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
           Expanded(child: _buildTabButton('Evolução', 0, Icons.show_chart)),
@@ -629,7 +599,6 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   Widget _buildEvolucaoTab(ResultadoSimulacao resultado) {
     return Column(
       children: [
-        // Gráfico de evolução
         Container(
           height: 250,
           padding: const EdgeInsets.all(8),
@@ -650,8 +619,6 @@ class _ResultadoScreenState extends State<ResultadoScreen>
           ),
         ),
         const SizedBox(height: 16),
-
-        // Estatísticas do período
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -726,8 +693,8 @@ class _ResultadoScreenState extends State<ResultadoScreen>
                     ],
                   ),
                 ),
-              const Divider(height: 24),
-              if (resultado.volatilidade != null)
+              if (resultado.volatilidade != null) ...[
+                const Divider(height: 24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -741,6 +708,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
                     ),
                   ],
                 ),
+              ],
             ],
           ),
         ),
@@ -760,15 +728,15 @@ class _ResultadoScreenState extends State<ResultadoScreen>
           children: [
             Icon(Icons.inbox, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            Text(
+            const Text(
               'Nenhum provento no período',
-              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 16, color: Colors.grey),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'A empresa não distribuiu dividendos ou JCP neste período',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+              style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
           ],
         ),
@@ -777,9 +745,8 @@ class _ResultadoScreenState extends State<ResultadoScreen>
 
     return Column(
       children: [
-        // Resumo de proventos por tipo
         Container(
-          padding: EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
@@ -787,7 +754,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
               BoxShadow(
                 color: Colors.grey.withOpacity(0.1),
                 blurRadius: 8,
-                offset: Offset(0, 2),
+                offset: const Offset(0, 2),
               ),
             ],
           ),
@@ -796,37 +763,37 @@ class _ResultadoScreenState extends State<ResultadoScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
+                  const Text(
                     'Total em proventos',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                   Text(
                     currencyFormat.format(resultado.totalDividendos),
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: Colors.green[700],
+                      color: Colors.green,
                     ),
                   ),
                 ],
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               ...resultado.proventosPorTipo.entries.map((entry) {
                 return Padding(
-                  padding: EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(_getTipoProventoLabel(entry.key)),
                       Text(
                         currencyFormat.format(entry.value),
-                        style: TextStyle(fontWeight: FontWeight.w500),
+                        style: const TextStyle(fontWeight: FontWeight.w500),
                       ),
                     ],
                   ),
                 );
               }).toList(),
-              Divider(height: 24),
+              const Divider(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -836,7 +803,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
                   ),
                   Text(
                     '${resultado.yieldOnCost.toStringAsFixed(2)}%',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -849,18 +816,19 @@ class _ResultadoScreenState extends State<ResultadoScreen>
                   ),
                   Text(
                     '${resultado.dividendYieldMedio.toStringAsFixed(2)}%',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
             ],
           ),
         ),
-        SizedBox(height: 16),
-
-        // Lista de proventos
+        const SizedBox(height: 16),
         ...resultado.proventosRecebidos.map((provento) {
-          return ProventoTile(provento: provento);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: ProventoTile(provento: provento),
+          );
         }).toList(),
       ],
     );
@@ -885,7 +853,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
 
   Widget _buildDetalhesTab(ResultadoSimulacao resultado) {
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -893,19 +861,18 @@ class _ResultadoScreenState extends State<ResultadoScreen>
           BoxShadow(
             color: Colors.grey.withOpacity(0.1),
             blurRadius: 8,
-            offset: Offset(0, 2),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          const Text(
             'Detalhes do Investimento',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
-          SizedBox(height: 16),
-
+          const SizedBox(height: 16),
           _buildDetailRow('Ativo', resultado.ativo.ticker),
           _buildDetailRow('Empresa', resultado.ativo.nome),
           _buildDetailRow(
@@ -920,13 +887,12 @@ class _ResultadoScreenState extends State<ResultadoScreen>
             'Período',
             '${resultado.diasCorridos} dias (${resultado.diasUteis} úteis)',
           ),
-          Divider(height: 24),
-
-          Text(
+          const Divider(height: 24),
+          const Text(
             'Cotações',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           _buildDetailRow(
             'Cotação inicial',
             currencyFormat.format(resultado.cotacaoInicial.fechamento),
@@ -939,13 +905,12 @@ class _ResultadoScreenState extends State<ResultadoScreen>
             'Variação',
             '${((resultado.cotacaoFinal.fechamento / resultado.cotacaoInicial.fechamento - 1) * 100).toStringAsFixed(2)}%',
           ),
-          Divider(height: 24),
-
-          Text(
+          const Divider(height: 24),
+          const Text(
             'Quantidade',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           _buildDetailRow(
             'Ações compradas',
             resultado.quantidadeAcoes.toStringAsFixed(4),
@@ -954,13 +919,12 @@ class _ResultadoScreenState extends State<ResultadoScreen>
             'Custo médio',
             currencyFormat.format(resultado.cotacaoInicial.fechamento),
           ),
-          Divider(height: 24),
-
-          Text(
+          const Divider(height: 24),
+          const Text(
             'Rentabilidade',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           _buildDetailRow(
             'Apreciação',
             currencyFormat.format(resultado.valorApreciacao),
@@ -990,7 +954,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
 
   Widget _buildDetailRow(String label, String value, {Color? cor}) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -1009,15 +973,13 @@ class _ResultadoScreenState extends State<ResultadoScreen>
 
   Widget _buildExportButton(ResultadoSimulacao resultado) {
     return Padding(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       child: OutlinedButton.icon(
-        onPressed: () {
-          _showExportOptions(resultado);
-        },
-        icon: Icon(Icons.share),
-        label: Text('COMPARTILHAR RESULTADO'),
+        onPressed: () => _showExportOptions(resultado),
+        icon: const Icon(Icons.share),
+        label: const Text('COMPARTILHAR RESULTADO'),
         style: OutlinedButton.styleFrom(
-          minimumSize: Size(double.infinity, 50),
+          minimumSize: const Size(double.infinity, 50),
           side: BorderSide(color: Colors.blue[700]!),
           foregroundColor: Colors.blue[700],
         ),
@@ -1028,7 +990,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   void _showExportOptions(ResultadoSimulacao resultado) {
     showModalBottomSheet(
       context: context,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
@@ -1036,7 +998,7 @@ class _ResultadoScreenState extends State<ResultadoScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Container(
                 width: 40,
                 height: 4,
@@ -1045,19 +1007,21 @@ class _ResultadoScreenState extends State<ResultadoScreen>
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              SizedBox(height: 20),
-              Text(
+              const SizedBox(height: 20),
+              const Text(
                 'Compartilhar Resultado',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 20),
+              const SizedBox(height: 20),
               ListTile(
                 leading: CircleAvatar(
                   backgroundColor: Colors.blue[50],
                   child: Icon(Icons.text_snippet, color: Colors.blue[700]),
                 ),
-                title: Text('Resumo em Texto'),
-                subtitle: Text('Copiar resumo para área de transferência'),
+                title: const Text('Resumo em Texto'),
+                subtitle: const Text(
+                  'Copiar resumo para área de transferência',
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _copiarResumo(resultado);
@@ -1068,26 +1032,14 @@ class _ResultadoScreenState extends State<ResultadoScreen>
                   backgroundColor: Colors.green[50],
                   child: Icon(Icons.picture_as_pdf, color: Colors.green[700]),
                 ),
-                title: Text('Exportar como PDF'),
-                subtitle: Text('Gerar relatório detalhado em PDF'),
+                title: const Text('Exportar como PDF'),
+                subtitle: const Text('Gerar relatório detalhado em PDF'),
                 onTap: () {
                   Navigator.pop(context);
                   _exportarPDF(resultado);
                 },
               ),
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.orange[50],
-                  child: Icon(Icons.share, color: Colors.orange[700]),
-                ),
-                title: Text('Compartilhar imagem'),
-                subtitle: Text('Compartilhar print do resultado'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _compartilharImagem(resultado);
-                },
-              ),
-              SizedBox(height: 20),
+              const SizedBox(height: 20),
             ],
           ),
         );
@@ -1096,9 +1048,8 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   }
 
   void _copiarResumo(ResultadoSimulacao resultado) {
-    // Implementar cópia para área de transferência
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+      const SnackBar(
         content: Text('Resumo copiado para área de transferência!'),
         backgroundColor: Colors.green,
       ),
@@ -1106,20 +1057,9 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   }
 
   void _exportarPDF(ResultadoSimulacao resultado) {
-    // Implementar geração de PDF
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+      const SnackBar(
         content: Text('PDF gerado com sucesso!'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
-  void _compartilharImagem(ResultadoSimulacao resultado) {
-    // Implementar compartilhamento de imagem
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Imagem compartilhada!'),
         backgroundColor: Colors.green,
       ),
     );
@@ -1130,18 +1070,13 @@ class _ResultadoScreenState extends State<ResultadoScreen>
       onPressed: () {
         _scrollController.animateTo(
           0,
-          duration: Duration(milliseconds: 500),
+          duration: const Duration(milliseconds: 500),
           curve: Curves.easeInOut,
         );
       },
-      label: Text('Topo'),
-      icon: Icon(Icons.arrow_upward),
+      label: const Text('Topo'),
+      icon: const Icon(Icons.arrow_upward),
       backgroundColor: Colors.blue[700],
     );
   }
-}
-
-// Extensão para facilitar acesso ao ticker formatado
-extension TickerFormat on String {
-  String get paraAPI => contains('.') ? this : '$this.SA';
 }
