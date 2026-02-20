@@ -189,6 +189,7 @@ class RendaFixaService {
     required DateTime dataFim,
   }) async {
     double valorAtual = valorInicial;
+    int mesesAplicados = 0;
 
     for (var taxa in _taxasCache!) {
       // taxa.cdi = 9.9 (percentual ao ano)
@@ -201,9 +202,33 @@ class RendaFixaService {
       print('  Fator: ${(1 + cdiDecimalMensal).toStringAsFixed(5)}');
 
       valorAtual = valorAtual * (1 + cdiDecimalMensal);
+      mesesAplicados++;
     }
 
-    return valorAtual;
+    //return valorAtual;
+
+    // Calcula o rendimento bruto
+    final rendimentoBruto = valorAtual - valorInicial;
+
+    // Calcula o imposto de renda conforme prazo
+    final diasInvestimento = dataFim.difference(dataInicio).inDays;
+    final aliquotaIR = _getAliquotaIR(diasInvestimento);
+    final imposto = rendimentoBruto * aliquotaIR;
+
+    // Aplica o imposto (o IR é cobrado apenas sobre o rendimento)
+    final valorLiquido = valorInicial + (rendimentoBruto - imposto);
+
+    print(
+      '💰 CDI bruto após $mesesAplicados meses: ${_formatarMoeda(valorAtual)}',
+    );
+    print('💰 Rendimento bruto: ${_formatarMoeda(rendimentoBruto)}');
+    print(
+      '💰 Alíquota IR: ${(aliquotaIR * 100).toStringAsFixed(1)}% (${diasInvestimento} dias)',
+    );
+    print('💰 Imposto: ${_formatarMoeda(imposto)}');
+    print('💰 CDI líquido: ${_formatarMoeda(valorLiquido)}');
+
+    return valorLiquido;
   }
 
   // Future<double> _calcularCDI({
