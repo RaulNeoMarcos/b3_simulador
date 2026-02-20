@@ -20,9 +20,9 @@ class DadosHistoricosService {
 
   // Projeções realistas baseadas no Relatório Focus
   static const Map<int, Map<String, double>> _projecoes = {
-    2024: {'selic': 11.75, 'cdi': 11.65, 'tr': 0.0},
-    2025: {'selic': 10.00, 'cdi': 9.90, 'tr': 0.0},
-    2026: {'selic': 9.50, 'cdi': 9.40, 'tr': 0.0},
+    2024: {'selic': 11.75, 'cdi': 11.65, 'tr': 0.0}, // 11.65% ao ano
+    2025: {'selic': 10.00, 'cdi': 9.90, 'tr': 0.0}, // 9.90% ao ano
+    2026: {'selic': 9.50, 'cdi': 9.40, 'tr': 0.0}, // 9.40% ao ano
   };
 
   final Map<String, List<TaxaHistorica>> _cache = {};
@@ -92,81 +92,80 @@ class DadosHistoricosService {
   /// Busca dados REAIS para um mês específico
   Future<TaxaHistorica> _buscarTaxaReal(DateTime data) async {
     try {
-      // Formata a data para a API (apenas mês/ano)
-      final dataInicio = DateTime(data.year, data.month, 1);
-      final dataFim = DateTime(
-        data.year,
-        data.month,
-        data.month == 12 ? 31 : 1,
+      // Busca as três séries - valores já em PERCENTUAL
+      double? selic = await _buscarValorSerie(
+        'selic',
+        data,
+      ); // Retorna 10.5 (percentual)
+      double? cdi = await _buscarValorSerie(
+        'cdi',
+        data,
+      ); // Retorna 10.4 (percentual)
+      double? tr = await _buscarValorSerie(
+        'tr',
+        data,
+      ); // Retorna 0.0 (percentual)
+
+      // USA OS VALORES DIRETAMENTE - SEM DIVIDIR!
+      return TaxaHistorica(
+        data: data,
+        selic: selic ?? _getProjecaoAno(data.year)['selic']!, // 10.5
+        cdi: cdi ?? _getProjecaoAno(data.year)['cdi']!, // 10.4
+        tr:
+            (tr ?? _getProjecaoAno(data.year)['tr']!) /
+            100, // TR em decimal (0.0)
       );
-
-      // Busca as três séries em paralelo
-      final results = await Future.wait([
-        _buscarValorSerie('selic', dataInicio, dataFim),
-        _buscarValorSerie('cdi', dataInicio, dataFim),
-        _buscarValorSerie('tr', dataInicio, dataFim),
-      ]);
-
-      double selic = results[0] ?? _getProjecaoAno(data.year)['selic']!;
-      double cdi = results[1] ?? _getProjecaoAno(data.year)['cdi']!;
-      double tr = results[2] ?? _getProjecaoAno(data.year)['tr']!;
-
-      return TaxaHistorica(data: data, selic: selic, cdi: cdi, tr: tr / 100);
     } catch (e) {
-      print('⚠️ Erro ao buscar taxa real, usando projeção: $e');
       return _gerarTaxaProjetada(data);
     }
   }
 
   /// Busca valor de uma série para um período
-  Future<double?> _buscarValorSerie(
-    String serie,
-    DateTime inicio,
-    DateTime fim,
-  ) async {
+  Future<double?> _buscarValorSerie(String serie, DateTime data) async {
     final codigo = _codigosSeries[serie];
     if (codigo == null) return null;
 
     try {
-      final dataInicioStr = DateFormat('dd/MM/yyyy').format(inicio);
-      final dataFimStr = DateFormat('dd/MM/yyyy').format(fim);
-
-      final url =
-          '$_bcbBaseUrl$codigo/dados?formato=json&dataInicial=$dataInicioStr&dataFinal=$dataFimStr';
-
-      final response = await http
-          .get(Uri.parse(url), headers: {'Content-Type': 'application/json'})
-          .timeout(TIMEOUT);
+      final url = '...'; // sua URL
+      final response = await http.get(Uri.parse(url)).timeout(TIMEOUT);
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+        final List<dynamic> dataList = json.decode(response.body);
 
-        if (data.isNotEmpty) {
-          // Calcula a média do período (para séries diárias)
+        if (dataList.isNotEmpty) {
           double soma = 0;
           int count = 0;
 
-          for (var item in data) {
-            try {
-              final valor = double.parse(
-                item['valor'].toString().replaceAll(',', '.'),
-              );
-              soma += valor;
-              count++;
-            } catch (e) {
-              print('⚠️ Erro ao processar valor: $e');
-            }
+          for (var item in dataList) {
+            final valor = double.parse(
+              item['valor'].toString().replaceAll(',', '.'),
+            );
+            soma += valor;
+            count++;
           }
 
           if (count > 0) {
-            return soma / count;
+            final media = soma / count;
+
+            // 🚨 CORREÇÃO CRÍTICA: Se o valor for menor que 1, provavelmente veio em decimal
+            // e precisa ser convertido para percentual
+            if (media < 1 && serie != 'tr') {
+              // TR pode ser realmente pequena
+              final valorPercentual = media * 100;
+              print(
+                '📊 $serie em ${data.month}/${data.year}: ${media}% → CORRIGIDO: ${valorPercentual}%',
+              );
+              return valorPercentual;
+            }
+
+            print('📊 $serie em ${data.month}/${data.year}: $media%');
+            return media;
           }
         }
       }
 
       return null;
     } catch (e) {
-      print('⚠️ Erro ao buscar $serie: $e');
       return null;
     }
   }

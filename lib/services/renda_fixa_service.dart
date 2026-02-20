@@ -188,60 +188,83 @@ class RendaFixaService {
     required DateTime dataInicio,
     required DateTime dataFim,
   }) async {
-    if (_taxasCache == null || _taxasCache!.isEmpty) {
-      print('⚠️ Sem taxas para calcular CDI');
-      return valorInicial;
-    }
-
     double valorAtual = valorInicial;
-    int mesesAplicados = 0;
-    double rendimentoAcumulado = 0;
 
-    print('💰 Calculando CDI - Valor inicial: ${_formatarMoeda(valorInicial)}');
+    for (var taxa in _taxasCache!) {
+      // taxa.cdi = 9.9 (percentual ao ano)
+      final cdiPercentualMensal = taxa.cdi / 12; // 0.825% ao mês
+      final cdiDecimalMensal = cdiPercentualMensal / 100; // 0.00825
 
-    // Filtra apenas os meses dentro do período
-    final mesesNoPeriodo = _taxasCache!
-        .where(
-          (taxa) =>
-              !taxa.data.isBefore(dataInicio) && !taxa.data.isAfter(dataFim),
-        )
-        .toList();
+      print('Mês ${taxa.data.month}/${taxa.data.year}:');
+      print('  CDI anual: ${taxa.cdi}%');
+      print('  CDI mensal: ${cdiPercentualMensal.toStringAsFixed(3)}%');
+      print('  Fator: ${(1 + cdiDecimalMensal).toStringAsFixed(5)}');
 
-    for (var taxa in mesesNoPeriodo) {
-      // CDI anual convertido para mensal (decimal)
-      final cdiMensal = (taxa.cdi / 12) / 100;
-
-      valorAtual = valorAtual * (1 + cdiMensal);
-      mesesAplicados++;
-
-      print(
-        '📈 Mês ${taxa.data.month}/${taxa.data.year}: CDI ${(cdiMensal * 100).toStringAsFixed(3)}% → Acumulado: ${((valorAtual / valorInicial - 1) * 100).toStringAsFixed(2)}%',
-      );
+      valorAtual = valorAtual * (1 + cdiDecimalMensal);
     }
 
-    // Calcula o rendimento bruto
-    final rendimentoBruto = valorAtual - valorInicial;
-
-    // Calcula o imposto de renda conforme prazo
-    final diasInvestimento = dataFim.difference(dataInicio).inDays;
-    final aliquotaIR = _getAliquotaIR(diasInvestimento);
-    final imposto = rendimentoBruto * aliquotaIR;
-
-    // Aplica o imposto (o IR é cobrado apenas sobre o rendimento)
-    final valorLiquido = valorInicial + (rendimentoBruto - imposto);
-
-    print(
-      '💰 CDI bruto após $mesesAplicados meses: ${_formatarMoeda(valorAtual)}',
-    );
-    print('💰 Rendimento bruto: ${_formatarMoeda(rendimentoBruto)}');
-    print(
-      '💰 Alíquota IR: ${(aliquotaIR * 100).toStringAsFixed(1)}% (${diasInvestimento} dias)',
-    );
-    print('💰 Imposto: ${_formatarMoeda(imposto)}');
-    print('💰 CDI líquido: ${_formatarMoeda(valorLiquido)}');
-
-    return valorLiquido;
+    return valorAtual;
   }
+
+  // Future<double> _calcularCDI({
+  //   required double valorInicial,
+  //   required DateTime dataInicio,
+  //   required DateTime dataFim,
+  // }) async {
+  //   if (_taxasCache == null || _taxasCache!.isEmpty) {
+  //     print('⚠️ Sem taxas para calcular CDI');
+  //     return valorInicial;
+  //   }
+
+  //   double valorAtual = valorInicial;
+  //   int mesesAplicados = 0;
+  //   double rendimentoAcumulado = 0;
+
+  //   print('💰 Calculando CDI - Valor inicial: ${_formatarMoeda(valorInicial)}');
+
+  //   // Filtra apenas os meses dentro do período
+  //   final mesesNoPeriodo = _taxasCache!
+  //       .where(
+  //         (taxa) =>
+  //             !taxa.data.isBefore(dataInicio) && !taxa.data.isAfter(dataFim),
+  //       )
+  //       .toList();
+
+  //   for (var taxa in mesesNoPeriodo) {
+  //     // CDI anual convertido para mensal (decimal)
+  //     final cdiMensal = (taxa.cdi / 12) / 100;
+
+  //     valorAtual = valorAtual * (1 + cdiMensal);
+  //     mesesAplicados++;
+
+  //     print(
+  //       '📈 Mês ${taxa.data.month}/${taxa.data.year}: CDI ${(cdiMensal * 100).toStringAsFixed(3)}% → Acumulado: ${((valorAtual / valorInicial - 1) * 100).toStringAsFixed(2)}%',
+  //     );
+  //   }
+
+  //   // Calcula o rendimento bruto
+  //   final rendimentoBruto = valorAtual - valorInicial;
+
+  //   // Calcula o imposto de renda conforme prazo
+  //   final diasInvestimento = dataFim.difference(dataInicio).inDays;
+  //   final aliquotaIR = _getAliquotaIR(diasInvestimento);
+  //   final imposto = rendimentoBruto * aliquotaIR;
+
+  //   // Aplica o imposto (o IR é cobrado apenas sobre o rendimento)
+  //   final valorLiquido = valorInicial + (rendimentoBruto - imposto);
+
+  //   print(
+  //     '💰 CDI bruto após $mesesAplicados meses: ${_formatarMoeda(valorAtual)}',
+  //   );
+  //   print('💰 Rendimento bruto: ${_formatarMoeda(rendimentoBruto)}');
+  //   print(
+  //     '💰 Alíquota IR: ${(aliquotaIR * 100).toStringAsFixed(1)}% (${diasInvestimento} dias)',
+  //   );
+  //   print('💰 Imposto: ${_formatarMoeda(imposto)}');
+  //   print('💰 CDI líquido: ${_formatarMoeda(valorLiquido)}');
+
+  //   return valorLiquido;
+  // }
 
   /// Retorna alíquota de IR baseada no tempo de investimento
   double _getAliquotaIR(int dias) {
