@@ -34,6 +34,8 @@ dependencies:
     sdk: flutter
 
   # UI e utilitários
+  ml_linalg: ^13.9.0  # Para operações de álgebra linear
+  tflite_flutter: ^0.10.1  # Para TensorFlow Lite (opcional)
   intl: ^0.20.2
   fl_chart: ^0.63.0
   provider: ^6.0.5

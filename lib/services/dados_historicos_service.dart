@@ -2,11 +2,13 @@
 
 import 'dart:convert';
 import 'dart:async';
+import 'package:b3_simulador/services/logger_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '../models/taxa_historica.dart';
 
 class DadosHistoricosService {
+  final LoggerService _log = LoggerService();
   // APIs do Banco Central do Brasil
   static const String _bcbBaseUrl =
       'https://api.bcb.gov.br/dados/serie/bcdata.sgs.';
@@ -37,50 +39,80 @@ class DadosHistoricosService {
   }) async {
     final cacheKey = '${inicio.toIso8601String()}-${fim.toIso8601String()}';
 
+    _log.info(
+      'Buscando taxas históricas',
+      tag: 'BCB',
+      data: {
+        'inicio': inicio.toIso8601String(),
+        'fim': fim.toIso8601String(),
+        'usar_cache': usarCache,
+      },
+    );
+
     if (usarCache && _cache.containsKey(cacheKey)) {
-      print(
-        '📦 Usando cache para período ${_formatarData(inicio)} a ${_formatarData(fim)}',
+      _log.debug(
+        'Usando cache',
+        tag: 'BCB',
+        data: {'cache_key': cacheKey, 'tamanho': _cache[cacheKey]?.length},
       );
       return _cache[cacheKey]!;
     }
 
-    print(
-      '🔄 Processando período de ${_formatarData(inicio)} a ${_formatarData(fim)}',
-    );
-
     final hoje = DateTime.now();
     final taxas = <TaxaHistorica>[];
 
-    // Gera lista de TODOS os meses no período
     var dataAtual = DateTime(inicio.year, inicio.month, 1);
     final dataFim = DateTime(fim.year, fim.month, 1);
 
     int mesesProcessados = 0;
+    int mesesReais = 0;
+    int mesesProjetados = 0;
 
     while (!dataAtual.isAfter(dataFim)) {
       mesesProcessados++;
 
-      TaxaHistorica taxa;
+      try {
+        TaxaHistorica taxa;
 
-      if (dataAtual.isBefore(hoje) || dataAtual.isAtSameMomentAs(hoje)) {
-        // Dados REAIS (passado ou presente)
-        taxa = await _buscarTaxaReal(dataAtual);
-        print(
-          '📊 Mês ${mesesProcessados}: ${dataAtual.month}/${dataAtual.year} - DADO REAL',
-        );
-      } else {
-        // Dados PROJETADOS (futuro)
-        taxa = _gerarTaxaProjetada(dataAtual);
-        print(
-          '📈 Mês ${mesesProcessados}: ${dataAtual.month}/${dataAtual.year} - PROJEÇÃO',
+        if (dataAtual.isBefore(hoje) || dataAtual.isAtSameMomentAs(hoje)) {
+          taxa = await _buscarTaxaReal(dataAtual);
+          mesesReais++;
+        } else {
+          taxa = _gerarTaxaProjetada(dataAtual);
+          mesesProjetados++;
+        }
+
+        taxas.add(taxa);
+
+        if (mesesProcessados % 12 == 0) {
+          _log.debug(
+            'Progresso: $mesesProcessados meses',
+            tag: 'BCB',
+            data: {'reais': mesesReais, 'projetados': mesesProjetados},
+          );
+        }
+      } catch (e, stackTrace) {
+        _log.error(
+          'Erro ao processar mês',
+          tag: 'BCB',
+          error: e,
+          stackTrace: stackTrace,
+          data: {'mes': dataAtual.month, 'ano': dataAtual.year},
         );
       }
 
-      taxas.add(taxa);
       dataAtual = DateTime(dataAtual.year, dataAtual.month + 1, 1);
     }
 
-    print('✅ Total processado: $mesesProcessados meses');
+    _log.info(
+      'Processamento concluído',
+      tag: 'BCB',
+      data: {
+        'total_meses': mesesProcessados,
+        'meses_reais': mesesReais,
+        'meses_projetados': mesesProjetados,
+      },
+    );
 
     if (usarCache) {
       _cache[cacheKey] = taxas;
@@ -91,31 +123,42 @@ class DadosHistoricosService {
 
   /// Busca dados REAIS para um mês específico
   Future<TaxaHistorica> _buscarTaxaReal(DateTime data) async {
-    try {
-      // Busca as três séries - valores já em PERCENTUAL
-      double? selic = await _buscarValorSerie(
-        'selic',
-        data,
-      ); // Retorna 10.5 (percentual)
-      double? cdi = await _buscarValorSerie(
-        'cdi',
-        data,
-      ); // Retorna 10.4 (percentual)
-      double? tr = await _buscarValorSerie(
-        'tr',
-        data,
-      ); // Retorna 0.0 (percentual)
+    _log.debug(
+      'Buscando taxa real',
+      tag: 'BCB',
+      data: {'mes': data.month, 'ano': data.year},
+    );
 
-      // USA OS VALORES DIRETAMENTE - SEM DIVIDIR!
+    try {
+      double? selic = await _buscarValorSerie('selic', data);
+      double? cdi = await _buscarValorSerie('cdi', data);
+      double? tr = await _buscarValorSerie('tr', data);
+
+      _log.debug(
+        'Valores obtidos',
+        tag: 'BCB',
+        data: {
+          'selic': selic,
+          'cdi': cdi,
+          'tr': tr,
+          'fonte': selic != null ? 'API' : 'projeção',
+        },
+      );
+
       return TaxaHistorica(
         data: data,
-        selic: selic ?? _getProjecaoAno(data.year)['selic']!, // 10.5
-        cdi: cdi ?? _getProjecaoAno(data.year)['cdi']!, // 10.4
-        tr:
-            (tr ?? _getProjecaoAno(data.year)['tr']!) /
-            100, // TR em decimal (0.0)
+        selic: selic ?? _getProjecaoAno(data.year)['selic']!,
+        cdi: cdi ?? _getProjecaoAno(data.year)['cdi']!,
+        tr: (tr ?? _getProjecaoAno(data.year)['tr']!) / 100,
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _log.error(
+        'Erro ao buscar taxa real, usando projeção',
+        tag: 'BCB',
+        error: e,
+        stackTrace: stackTrace,
+        data: {'mes': data.month, 'ano': data.year},
+      );
       return _gerarTaxaProjetada(data);
     }
   }

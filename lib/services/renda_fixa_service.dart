@@ -4,8 +4,10 @@ import 'dart:math';
 import 'package:b3_simulador/models/comparativo_renda_fixa.dart';
 import 'package:b3_simulador/models/taxa_historica.dart';
 import 'package:b3_simulador/services/dados_historicos_service.dart';
+import 'package:b3_simulador/services/logger_service.dart';
 
 class RendaFixaService {
+  final LoggerService _log = LoggerService();
   final DadosHistoricosService _dadosService = DadosHistoricosService();
 
   // Cache de taxas por período
@@ -24,60 +26,65 @@ class RendaFixaService {
     required DateTime dataInicio,
     required DateTime dataFim,
   }) async {
-    // Validações
-    if (valorInicial <= 0) throw Exception('Valor inicial deve ser positivo');
-    if (dataInicio.isAfter(dataFim)) {
-      throw Exception('Data início não pode ser após data fim');
+    _log.info(
+      'Iniciando comparação renda fixa',
+      tag: 'RF',
+      data: {
+        'valor_inicial': valorInicial,
+        'data_inicio': dataInicio.toIso8601String(),
+        'data_fim': dataFim.toIso8601String(),
+      },
+    );
+
+    try {
+      await _carregarTaxas(dataInicio, dataFim);
+
+      _log.debug('Calculando poupança...', tag: 'RF');
+      final valorFinalPoupanca = await _calcularPoupanca(
+        valorInicial: valorInicial,
+        dataInicio: dataInicio,
+        dataFim: dataFim,
+      );
+
+      _log.debug('Calculando CDI...', tag: 'RF');
+      final valorFinalCDI = await _calcularCDI(
+        valorInicial: valorInicial,
+        dataInicio: dataInicio,
+        dataFim: dataFim,
+      );
+
+      final resultado = ComparativoRendaFixa(
+        valorInicial: valorInicial,
+        dataInicio: dataInicio,
+        dataFim: dataFim,
+        valorFinalPoupanca: valorFinalPoupanca,
+        rendimentoPoupanca: valorFinalPoupanca - valorInicial,
+        percentualPoupanca: ((valorFinalPoupanca / valorInicial - 1) * 100),
+        valorFinalCDI: valorFinalCDI,
+        rendimentoCDI: valorFinalCDI - valorInicial,
+        percentualCDI: ((valorFinalCDI / valorInicial - 1) * 100),
+      );
+
+      _log.info(
+        'Comparação concluída',
+        tag: 'RF',
+        data: {
+          'poupanca_final': valorFinalPoupanca,
+          'cdi_final': valorFinalCDI,
+          'diferenca': valorFinalCDI - valorFinalPoupanca,
+        },
+      );
+
+      return resultado;
+    } catch (e, stackTrace) {
+      _log.error(
+        'Erro na comparação renda fixa',
+        tag: 'RF',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      rethrow;
     }
-
-    print(
-      '📊 Calculando renda fixa de ${_formatarData(dataInicio)} a ${_formatarData(dataFim)}',
-    );
-
-    // Busca taxas do período
-    await _carregarTaxas(dataInicio, dataFim);
-
-    // Calcula rendimentos
-    final valorFinalPoupanca = await _calcularPoupanca(
-      valorInicial: valorInicial,
-      dataInicio: dataInicio,
-      dataFim: dataFim,
-    );
-
-    final valorFinalCDI = await _calcularCDI(
-      valorInicial: valorInicial,
-      dataInicio: dataInicio,
-      dataFim: dataFim,
-    );
-
-    final rendimentoPoupanca = valorFinalPoupanca - valorInicial;
-    final rendimentoCDI = valorFinalCDI - valorInicial;
-
-    final percentualPoupanca = valorInicial > 0
-        ? (rendimentoPoupanca / valorInicial) * 100
-        : 0.0;
-    final percentualCDI = valorInicial > 0
-        ? (rendimentoCDI / valorInicial) * 100
-        : 0.0;
-
-    print(
-      '✅ Resultados - Poupança: ${_formatarMoeda(valorFinalPoupanca)} (${percentualPoupanca.toStringAsFixed(2)}%)',
-    );
-    print(
-      '✅ Resultados - CDI: ${_formatarMoeda(valorFinalCDI)} (${percentualCDI.toStringAsFixed(2)}%)',
-    );
-
-    return ComparativoRendaFixa(
-      valorInicial: valorInicial,
-      dataInicio: dataInicio,
-      dataFim: dataFim,
-      valorFinalPoupanca: valorFinalPoupanca,
-      rendimentoPoupanca: rendimentoPoupanca,
-      percentualPoupanca: percentualPoupanca,
-      valorFinalCDI: valorFinalCDI,
-      rendimentoCDI: rendimentoCDI,
-      percentualCDI: percentualCDI,
-    );
   }
 
   /// Carrega as taxas para o período
@@ -113,21 +120,19 @@ class RendaFixaService {
     required DateTime dataFim,
   }) async {
     if (_taxasCache == null || _taxasCache!.isEmpty) {
-      print('⚠️ Sem taxas para calcular poupança');
+      _log.warning('Sem taxas para calcular poupança', tag: 'RF');
       return valorInicial;
     }
 
     double valorAtual = valorInicial;
     int mesesAplicados = 0;
 
-    print('\n💰 CALCULANDO POUPANÇA');
-    print('=' * 50);
-    print('Valor inicial: ${_formatarMoeda(valorInicial)}');
-    print('Período: ${_formatarData(dataInicio)} a ${_formatarData(dataFim)}');
-    print('Total de taxas carregadas: ${_taxasCache!.length}');
-    print('=' * 50);
+    _log.debug(
+      'Iniciando cálculo poupança',
+      tag: 'RF',
+      data: {'valor_inicial': valorInicial, 'total_taxas': _taxasCache!.length},
+    );
 
-    // Filtra apenas os meses dentro do período
     final mesesNoPeriodo = _taxasCache!
         .where(
           (taxa) =>
@@ -135,49 +140,46 @@ class RendaFixaService {
         )
         .toList();
 
-    print('Meses no período: ${mesesNoPeriodo.length}');
-
     for (var taxa in mesesNoPeriodo) {
       mesesAplicados++;
 
       double rendimentoMensal;
+      String regra;
 
       if (taxa.selic > 8.5) {
         rendimentoMensal = 0.005 + taxa.tr;
-        print('Mês ${mesesAplicados}: ${taxa.data.month}/${taxa.data.year}');
-        print('  Selic: ${taxa.selic.toStringAsFixed(2)}% (>8.5%)');
-        print('  TR: ${(taxa.tr * 100).toStringAsFixed(3)}%');
-        print(
-          '  Rendimento: 0.5% + ${(taxa.tr * 100).toStringAsFixed(3)}% = ${(rendimentoMensal * 100).toStringAsFixed(3)}%',
-        );
+        regra = 'selic > 8.5%';
       } else {
         final selicMensal = taxa.selic / 12 / 100;
         rendimentoMensal = 0.7 * selicMensal + taxa.tr;
-        print('Mês ${mesesAplicados}: ${taxa.data.month}/${taxa.data.year}');
-        print('  Selic: ${taxa.selic.toStringAsFixed(2)}% (≤8.5%)');
-        print('  Selic mensal: ${(selicMensal * 100).toStringAsFixed(3)}%');
-        print('  TR: ${(taxa.tr * 100).toStringAsFixed(3)}%');
-        print(
-          '  Rendimento: 70% de ${(selicMensal * 100).toStringAsFixed(3)}% + ${(taxa.tr * 100).toStringAsFixed(3)}% = ${(rendimentoMensal * 100).toStringAsFixed(3)}%',
-        );
+        regra = 'selic <= 8.5%';
       }
 
       valorAtual = valorAtual * (1 + rendimentoMensal);
-      print('  Valor após mês: ${_formatarMoeda(valorAtual)}');
-      print(
-        '  Acumulado: ${((valorAtual / valorInicial - 1) * 100).toStringAsFixed(2)}%',
+
+      _log.debug(
+        'Mês $mesesAplicados processado',
+        tag: 'RF',
+        data: {
+          'data': '${taxa.data.month}/${taxa.data.year}',
+          'selic': taxa.selic,
+          'tr': taxa.tr,
+          'regra': regra,
+          'rendimento': rendimentoMensal * 100,
+          'valor_atual': valorAtual,
+        },
       );
-      print('-' * 40);
     }
 
-    print('=' * 50);
-    print('RESULTADO FINAL POUPANÇA:');
-    print('Valor final: ${_formatarMoeda(valorAtual)}');
-    print('Rendimento total: ${_formatarMoeda(valorAtual - valorInicial)}');
-    print(
-      'Percentual: ${((valorAtual / valorInicial - 1) * 100).toStringAsFixed(2)}%',
+    _log.info(
+      'Cálculo poupança finalizado',
+      tag: 'RF',
+      data: {
+        'valor_final': valorAtual,
+        'rendimento_total': valorAtual - valorInicial,
+        'percentual': ((valorAtual / valorInicial - 1) * 100),
+      },
     );
-    print('=' * 50);
 
     return valorAtual;
   }

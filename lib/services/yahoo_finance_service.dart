@@ -1,6 +1,7 @@
 // lib/services/yahoo_finance_service.dart
 
 import 'dart:convert';
+import 'package:b3_simulador/services/logger_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:b3_simulador/models/ativo.dart';
 import 'package:b3_simulador/models/cotacao.dart';
@@ -8,6 +9,7 @@ import 'package:b3_simulador/models/provento.dart';
 import 'dart:async';
 
 class YahooFinanceService {
+  final LoggerService _log = LoggerService();
   final String _baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
   // Cache para evitar requisições repetidas
@@ -27,8 +29,19 @@ class YahooFinanceService {
     final cacheKey =
         '$tickerFormatado-${dataInicio.toIso8601String()}-${dataFim.toIso8601String()}';
 
+    _log.info(
+      'Iniciando busca de dados',
+      tag: 'YAHOO',
+      data: {
+        'ticker': tickerFormatado,
+        'inicio': dataInicio.toIso8601String(),
+        'fim': dataFim.toIso8601String(),
+      },
+    );
+
     // Verifica cache
     if (_cache.containsKey(cacheKey)) {
+      _log.debug('Usando cache para $tickerFormatado', tag: 'YAHOO');
       print('📦 Usando cache para $tickerFormatado');
       return _cache[cacheKey]!;
     }
@@ -43,11 +56,31 @@ class YahooFinanceService {
         fim: dataFim,
       );
 
+      _log.info(
+        'Cotações obtidas com sucesso',
+        tag: 'YAHOO',
+        data: {
+          'quantidade': cotacoes.length,
+          'primeira': cotacoes.isNotEmpty
+              ? cotacoes.first.data.toIso8601String()
+              : null,
+          'ultima': cotacoes.isNotEmpty
+              ? cotacoes.last.data.toIso8601String()
+              : null,
+        },
+      );
+
       // Busca dividendos (via endpoint específico)
       final dividendos = await _buscarDividendos(
         ticker: tickerFormatado,
         inicio: dataInicio,
         fim: dataFim,
+      );
+
+      _log.info(
+        'Dividendos obtidos com sucesso',
+        tag: 'YAHOO',
+        data: {'quantidade': dividendos.length},
       );
 
       // Cria informações do ativo
@@ -66,7 +99,21 @@ class YahooFinanceService {
       _cache[cacheKey] = resultado;
 
       return resultado;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _log.error(
+        'Erro ao buscar dados do Yahoo Finance',
+        tag: 'YAHOO',
+        error: e,
+        stackTrace: stackTrace,
+        data: {
+          'ticker': tickerFormatado,
+          'inicio': dataInicio.toIso8601String(),
+          'fim': dataFim.toIso8601String(),
+        },
+      );
+
+      _log.warning('Usando dados mockados como fallback', tag: 'YAHOO');
+
       print('❌ Erro no Yahoo Finance: $e');
 
       // Em caso de erro, retorna dados mockados para não quebrar o app
@@ -120,24 +167,33 @@ class YahooFinanceService {
   }) async {
     int tentativas = 0;
 
+    _log.debug(
+      'Iniciando busca de cotações',
+      tag: 'YAHOO',
+      data: {'ticker': ticker, 'tentativas_max': MAX_RETRIES},
+    );
+
     while (tentativas < MAX_RETRIES) {
       try {
-        // Converte datas para timestamps (segundos)
+        tentativas++;
+        final cincoAnosAtras = DateTime(
+          inicio.year - 5,
+          inicio.month,
+          inicio.day,
+        );
+
         final period1 = (inicio.millisecondsSinceEpoch / 1000).floor();
         final period2 = (fim.millisecondsSinceEpoch / 1000).floor();
-
-        // Define o intervalo baseado no período
         final intervalo = _determinarIntervalo(inicio, fim);
 
         final url =
-            '$_baseUrl$ticker?'
-            'period1=$period1&'
-            'period2=$period2&'
-            'interval=$intervalo&'
-            'includePrePost=false&'
-            'events=div%7Csplit';
+            '$_baseUrl$ticker?period1=$period1&period2=$period2&interval=$intervalo&includePrePost=false&events=div%7Csplit';
 
-        print('📡 URL: $url');
+        _log.debug(
+          'Fazendo requisição',
+          tag: 'YAHOO',
+          data: {'tentativa': tentativas, 'url': url},
+        );
 
         final response = await http
             .get(
@@ -149,10 +205,18 @@ class YahooFinanceService {
             )
             .timeout(TIMEOUT);
 
+        _log.debug(
+          'Resposta recebida',
+          tag: 'YAHOO',
+          data: {
+            'status_code': response.statusCode,
+            'tamanho': response.body.length,
+          },
+        );
+
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
 
-          // Verifica se há erro na resposta
           if (data['chart']['error'] != null) {
             throw Exception(data['chart']['error']['description']);
           }
@@ -162,50 +226,71 @@ class YahooFinanceService {
           final indicators = result['indicators']['quote'][0];
 
           final cotacoes = <Cotacao>[];
+          int nullCount = 0;
 
           for (int i = 0; i < timestamps.length; i++) {
-            final timestamp = timestamps[i];
-            final data = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
-
-            // Extrai valores (podem ser null em feriados)
-            final close = _getDoubleValue(indicators['close'], i);
-            final open = _getDoubleValue(indicators['open'], i);
-            final high = _getDoubleValue(indicators['high'], i);
-            final low = _getDoubleValue(indicators['low'], i);
-            final volume = _getDoubleValue(indicators['volume'], i);
-
-            // Só adiciona se tiver preço de fechamento
-            if (close != null && close > 0) {
-              cotacoes.add(
-                Cotacao(
-                  data: data,
-                  abertura: open ?? close,
-                  fechamento: close,
-                  maxima: high ?? close,
-                  minima: low ?? close,
-                  volume: volume ?? 0,
-                  ticker: ticker,
-                ),
+            try {
+              final timestamp = timestamps[i];
+              final data = DateTime.fromMillisecondsSinceEpoch(
+                timestamp * 1000,
               );
+
+              final close = _getDoubleValue(indicators['close'], i);
+
+              if (close != null && close > 0) {
+                final open = _getDoubleValue(indicators['open'], i) ?? close;
+                final high = _getDoubleValue(indicators['high'], i) ?? close;
+                final low = _getDoubleValue(indicators['low'], i) ?? close;
+                final volume = _getDoubleValue(indicators['volume'], i) ?? 0;
+
+                cotacoes.add(
+                  Cotacao(
+                    data: data,
+                    abertura: open,
+                    fechamento: close,
+                    maxima: high,
+                    minima: low,
+                    volume: volume,
+                    ticker: ticker,
+                  ),
+                );
+              } else {
+                nullCount++;
+              }
+            } catch (e) {
+              _log.warning(
+                'Erro ao processar cotação $i',
+              ); // 👈 REMOVA OS PARÂMETROS error E stackTrace
             }
           }
 
-          print('✅ Encontradas ${cotacoes.length} cotações para $ticker');
+          _log.debug(
+            'Cotações processadas',
+            tag: 'YAHOO',
+            data: {
+              'total': timestamps.length,
+              'validas': cotacoes.length,
+              'nulas': nullCount,
+            },
+          );
 
           if (cotacoes.isEmpty) {
-            throw Exception('Nenhuma cotação encontrada no período');
+            throw Exception('Nenhuma cotação válida encontrada');
           }
 
           return cotacoes;
         } else {
-          throw Exception('Erro HTTP ${response.statusCode}');
+          throw Exception(
+            'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+          );
         }
-      } catch (e) {
-        tentativas++;
-        print('⚠️ Tentativa $tentativas falhou: $e');
+      } catch (e, stackTrace) {
+        _log.warning(
+          'Tentativa $tentativas falhou - $e',
+        ); // 👈 INCLUA O ERRO NA MENSAGEM
 
         if (tentativas == MAX_RETRIES) {
-          print('❌ Todas as tentativas falharam para $ticker');
+          _log.error('Todas as tentativas falharam', tag: 'YAHOO');
           return [];
         }
 

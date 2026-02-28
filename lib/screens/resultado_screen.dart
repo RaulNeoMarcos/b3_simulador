@@ -1,19 +1,23 @@
 // lib/screens/resultado_screen.dart
 
+import 'package:b3_simulador/models/cotacao.dart';
+import 'package:b3_simulador/models/ml_prediction.dart';
 import 'package:b3_simulador/models/resultado_simulacao.dart';
+import 'package:b3_simulador/models/valuation_avancado.dart';
+import 'package:b3_simulador/screens/debug_logs_screen.dart';
+import 'package:b3_simulador/services/fundamentalista_service.dart';
+import 'package:b3_simulador/services/ml_models.dart';
+import 'package:b3_simulador/services/valuation_avancado_service.dart';
+import 'package:b3_simulador/widgets/ml_prediction_card.dart';
+import 'package:b3_simulador/widgets/valuation_avancado_card.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:provider/provider.dart';
-
-import '../models/resultado_simulacao.dart';
 import '../models/provento.dart';
 import '../services/simulador_service.dart';
 import '../widgets/comparativo_renda_fixa_card.dart';
 import '../widgets/fonte_dados_indicator.dart';
 import '../widgets/grafico_evolucao.dart';
 import '../widgets/provento_tile.dart';
-import '../providers/simulacao_provider.dart';
 
 class ResultadoScreen extends StatefulWidget {
   final String ticker;
@@ -52,6 +56,29 @@ class _ResultadoScreenState extends State<ResultadoScreen>
   @override
   void initState() {
     super.initState();
+
+    // Detectar shake do dispositivo
+    // ShakeDetector.autoStart(
+    //   onPhoneShake: () {
+    //     // Abrir debug logs quando o usuário chacoalhar o celular
+    //     Navigator.push(
+    //       context,
+    //       MaterialPageRoute(builder: (_) => const DebugLogsScreen()),
+    //     );
+
+    //     // Feedback visual
+    //     ScaffoldMessenger.of(context).showSnackBar(
+    //       const SnackBar(
+    //         content: Text('Abrindo logs de debug...'),
+    //         duration: Duration(seconds: 1),
+    //         backgroundColor: Colors.orange,
+    //       ),
+    //     );
+    //   },
+    //   minimumShakeCount: 3,
+    //   shakeSlopTimeMS: 500,
+    //   shakeCountResetTime: 3000,
+    // );
 
     _animationController = AnimationController(
       vsync: this,
@@ -106,11 +133,51 @@ class _ResultadoScreenState extends State<ResultadoScreen>
     }
   }
 
+  Future<Map<String, dynamic>> _buscarDadosFundamentalistas(
+    String ticker,
+  ) async {
+    try {
+      final dados = await FundamentalistaService.buscarDadosFundamentalistas(
+        ticker,
+      );
+      print('📊 Dados fundamentalistas carregados: $dados');
+      return dados;
+    } catch (e) {
+      print('🔥 Erro ao buscar fundamentalistas: $e');
+      return {}; // Retorna vazio em caso de erro
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: _buildAppBar(),
+      // drawer: Drawer(
+      //   child: ListView(
+      //     padding: EdgeInsets.zero,
+      //     children: [
+      //       const DrawerHeader(
+      //         decoration: BoxDecoration(color: Colors.blue),
+      //         child: Text(
+      //           'Menu',
+      //           style: TextStyle(color: Colors.white, fontSize: 24),
+      //         ),
+      //       ),
+      //       ListTile(
+      //         leading: const Icon(Icons.bug_report, color: Colors.orange),
+      //         title: const Text('Debug Logs'),
+      //         onTap: () {
+      //           Navigator.pop(context); // Fecha o drawer
+      //           Navigator.push(
+      //             context,
+      //             MaterialPageRoute(builder: (_) => const DebugLogsScreen()),
+      //           );
+      //         },
+      //       ),
+      //     ],
+      //   ),
+      // ),
       body: _buildBody(),
       floatingActionButton: _buildFloatingButton(),
     );
@@ -134,7 +201,20 @@ class _ResultadoScreenState extends State<ResultadoScreen>
       backgroundColor: Colors.white,
       elevation: 0,
       centerTitle: false,
-      actions: [FonteDadosIndicator(), const SizedBox(width: 8)],
+      actions: [
+        FonteDadosIndicator(),
+        IconButton(
+          icon: const Icon(Icons.bug_report, color: Colors.orange),
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const DebugLogsScreen()),
+            );
+          },
+          tooltip: 'Ver logs de debug',
+        ),
+        const SizedBox(width: 8),
+      ],
     );
   }
 
@@ -212,6 +292,29 @@ class _ResultadoScreenState extends State<ResultadoScreen>
               style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
             const SizedBox(height: 24),
+
+            // 👇 BOTÃO DE DEBUG AQUI
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DebugLogsScreen()),
+                );
+              },
+              icon: const Icon(Icons.bug_report, color: Colors.orange),
+              label: const Text('Ver logs de debug'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.orange,
+                side: const BorderSide(color: Colors.orange),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -280,13 +383,18 @@ class _ResultadoScreenState extends State<ResultadoScreen>
       controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
+        // 1. Header com valor principal
         SliverToBoxAdapter(child: _buildHeaderCard(resultado)),
+        // 2. Métricas rápidas
         SliverToBoxAdapter(child: _buildMetricCards(resultado)),
+        // 3. Abas de navegação
         SliverToBoxAdapter(child: _buildTabBar()),
+        // 4. Conteúdo das abas (Evolução, Proventos, Detalhes)
         SliverPadding(
           padding: const EdgeInsets.all(16),
           sliver: SliverToBoxAdapter(child: _buildTabContent(resultado)),
         ),
+        // 5. Comparativo renda fixa
         if (resultado.comparativoRendaFixa != null)
           SliverToBoxAdapter(
             child: Padding(
@@ -297,7 +405,42 @@ class _ResultadoScreenState extends State<ResultadoScreen>
               ),
             ),
           ),
+
+        // 6. Valuation Avançado (Nível 4)
+        // 👇 BOTÃO DE DEBUG DISCRETO NO FINAL
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const DebugLogsScreen()),
+                  );
+                },
+                icon: Icon(Icons.bug_report, size: 16, color: Colors.grey[400]),
+                label: Text(
+                  'Debug Logs',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // 7. 🔥 PREVISÕES ML (Nível 11) - COLOCAR AQUI! 🔥
+        SliverToBoxAdapter(
+          child: _buildMLPredictions(
+            resultado.ativo.ticker,
+            resultado.historicoCotacoes,
+          ),
+        ),
+
+        // 8. Botão de exportar
         SliverToBoxAdapter(child: _buildExportButton(resultado)),
+
+        // 9. Espaço extra para o FAB
         const SliverToBoxAdapter(child: SizedBox(height: 80)),
       ],
     );
@@ -964,6 +1107,195 @@ class _ResultadoScreenState extends State<ResultadoScreen>
             style: TextStyle(
               fontWeight: FontWeight.w500,
               color: cor ?? Colors.grey[800],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // lib/screens/resultado_screen.dart
+
+  /// Constrói o card de Valuation Avançado (Nível 4)
+  Widget _buildValuationAvancado(String ticker) {
+    return FutureBuilder<ValuationAvancado?>(
+      future: ValuationAvancadoService().calcularValuation(ticker),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Center(
+              child: Column(
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Calculando valuation avançado...',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          print('Erro no valuation: ${snapshot.error}');
+          return const SizedBox.shrink();
+        }
+
+        if (snapshot.hasData && snapshot.data != null) {
+          return ValuationAvancadoCard(valuation: snapshot.data!);
+        }
+
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  /// Constrói o card de Previsões ML (Nível 11)
+  Widget _buildMLPredictions(String ticker, List<Cotacao> historico) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _buscarDadosFundamentalistas(ticker),
+      builder: (context, snapshotFundamental) {
+        if (snapshotFundamental.connectionState == ConnectionState.waiting) {
+          return _buildLoadingML('Carregando dados fundamentalistas...');
+        }
+
+        final dadosFundamental = snapshotFundamental.data ?? {};
+
+        return FutureBuilder<MLPrediction?>(
+          future: MLModels.ensemblePrediction(
+            ticker,
+            historico,
+            dadosFundamental, // 👈 Agora com dados reais!
+          ),
+          builder: (context, snapshot) {
+            print('🔄 Estado do ML: ${snapshot.connectionState}');
+            print('📦 Tem dados: ${snapshot.hasData}');
+            print('❌ Tem erro: ${snapshot.hasError}');
+
+            if (snapshot.hasError) {
+              print('🔥 ERRO ML: ${snapshot.error}');
+              return _buildErrorML('Erro nas previsões: ${snapshot.error}');
+            }
+
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return _buildLoadingML('Modelos de ML processando...');
+            }
+
+            if (!snapshot.hasData || snapshot.data == null) {
+              return _buildErrorML(
+                'Não foi possível gerar previsões para $ticker.\n'
+                'Tente novamente mais tarde.',
+              );
+            }
+
+            return MLPredictionCard(prediction: snapshot.data!);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLoadingML(String mensagem) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: Column(
+          children: [
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 60,
+                  height: 60,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Colors.purple[700]!,
+                    ),
+                  ),
+                ),
+                Icon(Icons.psychology, color: Colors.purple[700], size: 30),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              mensagem,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Isso pode levar alguns segundos',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorML(String mensagem) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.orange[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.orange[200]!),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange[700]),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Previsões ML indisponíveis',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    mensagem,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Widget auxiliar para mostrar status dos modelos
+  Widget _buildModeloStatus(String nome, bool ativo) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: ativo ? Colors.purple[50] : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: ativo ? Colors.purple : Colors.grey,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            nome,
+            style: TextStyle(
+              fontSize: 10,
+              color: ativo ? Colors.purple[700] : Colors.grey[600],
             ),
           ),
         ],
