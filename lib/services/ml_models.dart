@@ -322,6 +322,7 @@ class MLModels {
         limiteSuperior: precoPrevistoRealista * 1.05,
         diasTreinamento: historico.length,
         dataUltimoTreinamento: DateTime.now().subtract(const Duration(days: 1)),
+        fonteDados: dadosFundamentalistas['fonte'] ?? 'Múltiplas fontes',
       );
 
       print('✅ PREVISÃO FINAL CRIADA COM SUCESSO:');

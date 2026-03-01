@@ -36,6 +36,7 @@ class MLPrediction {
   final double limiteSuperior;
   final int diasTreinamento;
   final DateTime dataUltimoTreinamento;
+  final String fonteDados; // Ex: "Alpha Vantage", "Fundamentus", "Fallback"
 
   MLPrediction({
     required this.ticker,
@@ -60,6 +61,7 @@ class MLPrediction {
     required this.limiteSuperior,
     required this.diasTreinamento,
     required this.dataUltimoTreinamento,
+    required this.fonteDados,
   });
 
   // Getters para texto dos sinais

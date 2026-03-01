@@ -1158,17 +1158,27 @@ class _ResultadoScreenState extends State<ResultadoScreen>
     return FutureBuilder<Map<String, dynamic>>(
       future: _buscarDadosFundamentalistas(ticker),
       builder: (context, snapshotFundamental) {
+        print(
+          '📊 Fundamentalista snapshot: ${snapshotFundamental.connectionState}',
+        );
+
         if (snapshotFundamental.connectionState == ConnectionState.waiting) {
           return _buildLoadingML('Carregando dados fundamentalistas...');
         }
 
         final dadosFundamental = snapshotFundamental.data ?? {};
 
+        // Log para ver o que veio
+        print(
+          '📊 Dados fundamentalistas carregados: ${dadosFundamental.keys.length} campos',
+        );
+        print('📊 Fonte: ${dadosFundamental['fonte'] ?? 'desconhecida'}');
+
         return FutureBuilder<MLPrediction?>(
           future: MLModels.ensemblePrediction(
             ticker,
             historico,
-            dadosFundamental, // 👈 Agora com dados reais!
+            dadosFundamental,
           ),
           builder: (context, snapshot) {
             print('🔄 Estado do ML: ${snapshot.connectionState}');
@@ -1191,7 +1201,10 @@ class _ResultadoScreenState extends State<ResultadoScreen>
               );
             }
 
-            return MLPredictionCard(prediction: snapshot.data!);
+            return MLPredictionCard(
+              prediction: snapshot.data!,
+              fonteDados: dadosFundamental['fonte'] ?? 'Múltiplas fontes',
+            );
           },
         );
       },
